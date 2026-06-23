@@ -32,12 +32,20 @@ def get_engine():
     return _engine
 
 
+_sessionmaker = None
+
+
 def get_sessionmaker():
-    return async_sessionmaker(get_engine(), class_=AsyncSession, expire_on_commit=False)
+    global _sessionmaker
+    if _sessionmaker is None:
+        _sessionmaker = async_sessionmaker(
+            get_engine(), class_=AsyncSession, expire_on_commit=False
+        )
+    return _sessionmaker
 
 
 async def get_db():
-    async with get_sessionmaker() as session:
+    async with get_sessionmaker()() as session:
         yield session
 
 
