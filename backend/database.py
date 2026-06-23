@@ -19,7 +19,11 @@ class Base(DeclarativeBase):
 
 
 def _make_engine():
-    return create_async_engine(DATABASE_URL, echo=False)
+    return create_async_engine(
+        DATABASE_URL,
+        echo=False,
+        connect_args={"channel_binding": "disable"},
+    )
 
 
 _engine = None
