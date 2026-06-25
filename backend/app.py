@@ -4,10 +4,12 @@ import json
 import logging
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +21,7 @@ from .schemas import (
     QuestionUpdate, QuestionConfig, StatsResponse,
 )
 from .auth import verify_password, create_token, decode_token
-from .sse import notification_manager
+from .sse import notification_manager, event_generator
 from .seed import seed_database
 
 logger = logging.getLogger(__name__)
@@ -52,15 +54,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+if STATIC_DIR.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
+
 
 # --- Auth Dependency ---
 
 async def get_current_location(request: Request) -> str:
-    """Extract location_id from JWT in Authorization header."""
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid token")
     token = auth.removeprefix("Bearer ")
+    payload = decode_token(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return payload["location_id"]
+
+
+async def resolve_location(token: str = Query(...)) -> str:
     payload = decode_token(token)
     if payload is None:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
@@ -82,7 +94,6 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 @app.post("/api/checkin", response_model=CheckinResponse)
 async def checkin(body: CheckinRequest, db: AsyncSession = Depends(get_db)):
-    # Validate location exists
     result = await db.execute(select(Location).where(Location.id == body.location_id))
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=400, detail="Invalid location")
@@ -105,7 +116,6 @@ async def checkin(body: CheckinRequest, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(visitor)
 
-    # Notify dashboard clients via SSE
     await notification_manager.publish(body.location_id, "checkin", {
         "id": visitor.id,
         "first_name": visitor.first_name,
@@ -126,7 +136,6 @@ async def get_visitors(
     db: AsyncSession = Depends(get_db),
     _loc: str = Depends(get_current_location),
 ):
-    # Verify the token's location matches the requested location
     if _loc != location:
         raise HTTPException(status_code=403, detail="Location mismatch")
 
@@ -321,6 +330,26 @@ async def get_stats(
     )
 
 
+# --- SSE ---
+
+@app.get("/events")
+async def sse_events(
+    location: str = Query(...),
+    _loc: str = Depends(resolve_location),
+):
+    if _loc != location:
+        raise HTTPException(status_code=403, detail="Location mismatch")
+    return StreamingResponse(
+        event_generator(location),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # --- Health Check ---
 
 @app.get("/api/health")
@@ -337,3 +366,14 @@ async def debug():
         "startup_error": _startup_error,
         "database_url_scheme": DATABASE_URL.split("://")[0] if DATABASE_URL else "none",
     }
+
+
+# --- SPA catch-all ---
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    if full_path.startswith("api/") or full_path.startswith("events"):
+        raise HTTPException(status_code=404, detail="Not found")
+    if STATIC_DIR.is_dir() and (STATIC_DIR / "index.html").exists():
+        return FileResponse(str(STATIC_DIR / "index.html"))
+    raise HTTPException(status_code=404, detail="Not found")

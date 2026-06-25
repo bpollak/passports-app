@@ -1,0 +1,8 @@
+apiVersion: v2
+name: passports-app
+description: >-
+  Helm chart for UC San Diego Passports Visitor Management — visitor check-in
+  and queue management for UCSD Passport Services. FastAPI + SQLite on DSMLP.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

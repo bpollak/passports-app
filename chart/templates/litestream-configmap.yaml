@@ -1,0 +1,22 @@
+{{- if .Values.litestream.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "passports-app.fullname" . }}-litestream
+  labels:
+    {{- include "passports-app.labels" . | nindent 4 }}
+data:
+  litestream.yml: |
+    {{- if .Values.litestream.metrics.enabled }}
+    addr: ":{{ .Values.litestream.metrics.port }}"
+    {{- end }}
+    dbs:
+      - path: {{ .Values.litestream.dbPath }}
+        replica:
+          type: file
+          path: {{ .Values.litestream.replicaPath }}
+          sync-interval: {{ .Values.litestream.syncInterval }}
+        snapshot:
+          interval: {{ .Values.litestream.snapshotInterval }}
+          retention: {{ .Values.litestream.retention }}
+{{- end }}

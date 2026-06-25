@@ -4,7 +4,10 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./passports.db:/app/passports.db
+      - passports-data:/data
     environment:
       - JWT_SECRET=change-me-in-production-to-a-32-byte-key!
-      - DATABASE_URL=sqlite+aiosqlite:///app/passports.db
+      - DATABASE_URL=sqlite+aiosqlite:////data/passports.db
+
+volumes:
+  passports-data:
