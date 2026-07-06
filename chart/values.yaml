@@ -1,0 +1,110 @@
+replicaCount: 1
+
+strategy:
+  type: Recreate
+
+image:
+  repository: ghcr.io/dominicfeliton/passports-app
+  tag: "main"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+env:
+  DATABASE_URL: "sqlite+aiosqlite:////data/passports.db"
+  CORS_ALLOW_ORIGINS: "https://passports.apps.ucsd.edu"
+
+envFrom: []
+
+extraEnv:
+  - name: JWT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: passports-app-secrets
+        key: JWT_SECRET
+        optional: false
+  - name: LOCATION_CSC_PASSWORD_HASH
+    valueFrom:
+      secretKeyRef:
+        name: passports-app-secrets
+        key: LOCATION_CSC_PASSWORD_HASH
+        optional: false
+  - name: LOCATION_BOOKSTORE_PASSWORD_HASH
+    valueFrom:
+      secretKeyRef:
+        name: passports-app-secrets
+        key: LOCATION_BOOKSTORE_PASSWORD_HASH
+        optional: false
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  host: passports.apps.ucsd.edu
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: true
+    secretName: passports.apps.ucsd.edu
+
+litestream:
+  enabled: true
+  image: litestream/litestream:0.5.4
+  dbPath: /data/passports.db
+  replicaPath: /replica/passports
+  syncInterval: 1s
+  snapshotInterval: 1h
+  retention: 72h
+  metrics:
+    enabled: false
+    port: 9090
+  resources: {}
+
+persistence:
+  enabled: true
+  usePvc: true
+  mountPath: /data
+  size: 1Gi
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  annotations: {}
+  existingClaim: ""
+
+extraVolumes: []
+
+extraVolumeMounts: []
+
+probes:
+  path: /api/health
+  liveness:
+    initialDelaySeconds: 20
+    periodSeconds: 30
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+resources: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

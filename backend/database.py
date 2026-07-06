@@ -5,13 +5,19 @@ from sqlalchemy.orm import DeclarativeBase
 
 _raw_url = os.environ.get(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/passports",
+    "sqlite+aiosqlite:////data/passports.db",
 )
-DATABASE_URL = _re.sub(
-    r"^postgres(?:ql)?(?:\+[a-z]+)?://",
-    "postgresql+psycopg://",
-    _raw_url,
-)
+
+is_sqlite = _raw_url.startswith("sqlite")
+
+if not is_sqlite:
+    DATABASE_URL = _re.sub(
+        r"^postgres(?:ql)?(?:\+[a-z]+)?://",
+        "postgresql+psycopg://",
+        _raw_url,
+    )
+else:
+    DATABASE_URL = _raw_url
 
 
 class Base(DeclarativeBase):
@@ -19,7 +25,12 @@ class Base(DeclarativeBase):
 
 
 def _make_engine():
-    return create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+    kwargs = {"echo": False}
+    if is_sqlite:
+        kwargs["connect_args"] = {"check_same_thread": False}
+    else:
+        kwargs["pool_pre_ping"] = True
+    return create_async_engine(DATABASE_URL, **kwargs)
 
 
 _engine = None
