@@ -10,7 +10,7 @@ class Location(Base):
 
     id = Column(String(20), primary_key=True)  # 'csc', 'bookstore'
     name = Column(String(100), nullable=False)
-    password_hash = Column(String(255), nullable=True)
+    password_hash = Column(String(255), nullable=False)
 
     visitors = relationship("Visitor", back_populates="location")
 

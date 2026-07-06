@@ -1,27 +1,71 @@
+import os
+
+import bcrypt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .models import Location, FormQuestion
-from .auth import hash_password
 
-DEFAULT_PASSWORDS = {
-    "csc": "csc1960",
-    "bookstore": "book1960",
+REQUIRED_LOCATIONS = {
+    "csc": "CSC",
+    "bookstore": "Bookstore",
 }
+
+
+def _password_hash_env(loc_id: str) -> str:
+    return f"LOCATION_{loc_id.upper()}_PASSWORD_HASH"
+
+
+def _configured_password_hash(loc_id: str) -> str | None:
+    value = os.environ.get(_password_hash_env(loc_id))
+    return value.strip() if value and value.strip() else None
+
+
+def _validate_password_hash(loc_id: str, password_hash: str) -> None:
+    if not password_hash.startswith(("$2a$", "$2b$", "$2y$")):
+        raise RuntimeError(
+            f"{_password_hash_env(loc_id)} must be a bcrypt hash generated with "
+            "python -m backend.manage_passwords hash --password-stdin"
+        )
+    try:
+        bcrypt.checkpw(b"password-hash-validation", password_hash.encode("utf-8"))
+    except ValueError as exc:
+        raise RuntimeError(f"{_password_hash_env(loc_id)} is not a valid bcrypt hash") from exc
 
 
 async def seed_database(db: AsyncSession):
     """Ensure locations and default form questions exist."""
-    # Seed locations
-    for loc_id in ("csc", "bookstore"):
+    configured_password_hashes: dict[str, str] = {}
+    missing_password_envs: list[str] = []
+
+    for loc_id in REQUIRED_LOCATIONS:
+        password_hash = _configured_password_hash(loc_id)
+        if not password_hash:
+            missing_password_envs.append(_password_hash_env(loc_id))
+            continue
+        _validate_password_hash(loc_id, password_hash)
+        configured_password_hashes[loc_id] = password_hash
+
+    if missing_password_envs:
+        missing = ", ".join(missing_password_envs)
+        raise RuntimeError(
+            "Location dashboard password hashes are required and no defaults are seeded. "
+            f"Set bcrypt hashes via: {missing}"
+        )
+
+    for loc_id, name in REQUIRED_LOCATIONS.items():
         result = await db.execute(select(Location).where(Location.id == loc_id))
         existing = result.scalar_one_or_none()
+        password_hash = configured_password_hashes[loc_id]
+
         if existing is None:
-            name = "CSC" if loc_id == "csc" else "Bookstore"
             db.add(Location(
                 id=loc_id,
                 name=name,
-                password_hash=hash_password(DEFAULT_PASSWORDS[loc_id]),
+                password_hash=password_hash,
             ))
+        else:
+            existing.name = name
+            existing.password_hash = password_hash
 
     # Seed default form questions
     defaults = {

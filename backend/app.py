@@ -2,6 +2,9 @@ import csv
 import io
 import json
 import logging
+import os
+import time
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,18 +23,55 @@ from .schemas import (
     StatusUpdate, NotesUpdate, LoginRequest, LoginResponse,
     QuestionUpdate, QuestionConfig, StatsResponse,
 )
-from .auth import verify_password, create_token, decode_token
-from .sse import notification_manager, event_generator
+from .auth import verify_password, create_token, decode_token, require_jwt_secret
+from .sse import notification_manager
 from .seed import seed_database
 
 logger = logging.getLogger(__name__)
 
 _startup_error: str | None = None
+_rate_limits = defaultdict(deque)
+
+
+def _cors_origins() -> list[str]:
+    value = os.environ.get("CORS_ALLOW_ORIGINS", "")
+    return [origin.strip() for origin in value.split(",") if origin.strip()]
+
+
+def _client_key(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _enforce_rate_limit(
+    request: Request,
+    bucket: str,
+    max_attempts: int,
+    window_seconds: int,
+) -> None:
+    now = time.monotonic()
+    key = f"{bucket}:{_client_key(request)}"
+    attempts = _rate_limits[key]
+    while attempts and now - attempts[0] > window_seconds:
+        attempts.popleft()
+    if len(attempts) >= max_attempts:
+        raise HTTPException(status_code=429, detail="Too many requests")
+    attempts.append(now)
+
+
+def _safe_csv(value) -> str:
+    text = "" if value is None else str(value)
+    if text.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return f"'{text}"
+    return text
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _startup_error
+    require_jwt_secret()
     try:
         await init_db()
         async for db in get_db():
@@ -40,7 +80,8 @@ async def lifespan(app: FastAPI):
         logger.info("Database initialized successfully")
     except Exception as e:
         _startup_error = f"Database init failed: {e}"
-        logger.error(_startup_error)
+        logger.exception(_startup_error)
+        raise
     yield
 
 
@@ -48,11 +89,29 @@ app = FastAPI(title="UC San Diego Passports API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "img-src 'self' data: https://api.qrserver.com https://cdn.ucsd.edu; "
+        "style-src 'self' 'unsafe-inline' https://cdn.ucsd.edu; "
+        "font-src 'self' data: https://cdn.ucsd.edu; "
+        "script-src 'self'; connect-src 'self'",
+    )
+    response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 if STATIC_DIR.is_dir():
@@ -72,17 +131,15 @@ async def get_current_location(request: Request) -> str:
     return payload["location_id"]
 
 
-async def resolve_location(token: str = Query(...)) -> str:
-    payload = decode_token(token)
-    if payload is None:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    return payload["location_id"]
-
-
 # --- Public Routes ---
 
 @app.post("/api/auth/login")
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(
+    request: Request,
+    body: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    _enforce_rate_limit(request, "login", max_attempts=10, window_seconds=300)
     result = await db.execute(select(Location))
     locations = result.scalars().all()
     for loc in locations:
@@ -93,7 +150,12 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/api/checkin", response_model=CheckinResponse)
-async def checkin(body: CheckinRequest, db: AsyncSession = Depends(get_db)):
+async def checkin(
+    request: Request,
+    body: CheckinRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    _enforce_rate_limit(request, "checkin", max_attempts=30, window_seconds=60)
     result = await db.execute(select(Location).where(Location.id == body.location_id))
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=400, detail="Invalid location")
@@ -132,7 +194,7 @@ async def checkin(body: CheckinRequest, db: AsyncSession = Depends(get_db)):
 async def get_visitors(
     location: str = Query(...),
     date: str | None = Query(None),
-    search: str | None = Query(None),
+    search: str | None = Query(None, max_length=100),
     db: AsyncSession = Depends(get_db),
     _loc: str = Depends(get_current_location),
 ):
@@ -239,10 +301,11 @@ async def export_visitors(
 
     for v in visitors:
         writer.writerow([
-            v.id, v.first_name, v.last_name, v.email or "", v.phone,
-            v.visit_type, v.service_type or "", v.photo_format or "",
-            yes_no(v.app_complete), v.checklist or "",
-            yes_no(v.subscribe), v.notes or "", v.status,
+            _safe_csv(v.id), _safe_csv(v.first_name), _safe_csv(v.last_name),
+            _safe_csv(v.email), _safe_csv(v.phone),
+            _safe_csv(v.visit_type), _safe_csv(v.service_type), _safe_csv(v.photo_format),
+            _safe_csv(yes_no(v.app_complete)), _safe_csv(v.checklist),
+            _safe_csv(yes_no(v.subscribe)), _safe_csv(v.notes), _safe_csv(v.status),
             fmt_date(v.check_in_at), fmt_time(v.check_in_at), fmt_time(v.sign_out_at),
         ])
 
@@ -311,8 +374,19 @@ async def get_stats(
         ((passports_count - len(incomplete_app)) / passports_count * 100), 1
     ) if passports_count > 0 else 0
 
+    def checklist_value(v: Visitor, field: str):
+        if not v.checklist:
+            return None
+        try:
+            parsed = json.loads(v.checklist)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        return parsed.get(field)
+
     def missing(field):
-        return [v for v in passports if v.checklist and json.loads(v.checklist).get(field) is False]
+        return [v for v in passports if checklist_value(v, field) is False]
 
     return StatsResponse(
         total=total,
@@ -330,26 +404,6 @@ async def get_stats(
     )
 
 
-# --- SSE ---
-
-@app.get("/events")
-async def sse_events(
-    location: str = Query(...),
-    _loc: str = Depends(resolve_location),
-):
-    if _loc != location:
-        raise HTTPException(status_code=403, detail="Location mismatch")
-    return StreamingResponse(
-        event_generator(location),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
 # --- Health Check ---
 
 @app.get("/api/health")
@@ -357,15 +411,6 @@ async def health():
     if _startup_error:
         return {"status": "error", "detail": _startup_error}
     return {"status": "ok"}
-
-
-@app.get("/api/debug")
-async def debug():
-    from .database import DATABASE_URL
-    return {
-        "startup_error": _startup_error,
-        "database_url_scheme": DATABASE_URL.split("://")[0] if DATABASE_URL else "none",
-    }
 
 
 # --- SPA catch-all ---

@@ -15,6 +15,7 @@ fullnameOverride: ""
 
 env:
   DATABASE_URL: "sqlite+aiosqlite:////data/passports.db"
+  CORS_ALLOW_ORIGINS: "https://passports.apps.ucsd.edu"
 
 envFrom: []
 
@@ -24,6 +25,19 @@ extraEnv:
       secretKeyRef:
         name: passports-app-secrets
         key: JWT_SECRET
+        optional: false
+  - name: LOCATION_CSC_PASSWORD_HASH
+    valueFrom:
+      secretKeyRef:
+        name: passports-app-secrets
+        key: LOCATION_CSC_PASSWORD_HASH
+        optional: false
+  - name: LOCATION_BOOKSTORE_PASSWORD_HASH
+    valueFrom:
+      secretKeyRef:
+        name: passports-app-secrets
+        key: LOCATION_BOOKSTORE_PASSWORD_HASH
+        optional: false
 
 service:
   type: ClusterIP
@@ -34,12 +48,12 @@ ingress:
   enabled: true
   className: ""
   annotations: {}
-  host: passports.CHANGEME.ucsd.edu
+  host: passports.apps.ucsd.edu
   path: /
   pathType: Prefix
   tls:
     enabled: true
-    secretName: ""
+    secretName: passports.apps.ucsd.edu
 
 litestream:
   enabled: true

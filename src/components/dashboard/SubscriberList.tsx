@@ -34,10 +34,20 @@ export default function SubscriberList() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
+  const csvCell = (value: string) => {
+    const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value
+    return `"${safe.replace(/"/g, '""')}"`
+  }
+
   const exportCSV = () => {
     const header = `${t('subscribers.colName', undefined, lang)},${t('subscribers.colEmail', undefined, lang)},${t('subscribers.colPhone', undefined, lang)},${t('subscribers.colOptIn', undefined, lang)}\n`
     const rows = subscribers.map(s =>
-      `"${s.first_name} ${s.last_name}","${s.email}","${s.phone}","${new Date(s.check_in_at).toLocaleDateString()}"`
+      [
+        csvCell(`${s.first_name} ${s.last_name}`),
+        csvCell(s.email),
+        csvCell(s.phone),
+        csvCell(new Date(s.check_in_at).toLocaleDateString()),
+      ].join(',')
     ).join('\n')
     const blob = new Blob([header + rows], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)

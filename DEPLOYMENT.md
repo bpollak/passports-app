@@ -13,16 +13,54 @@
 |---|---|---|---|
 | `DATABASE_URL` | SQLite database path | `sqlite+aiosqlite:////data/passports.db` | no |
 | `JWT_SECRET` | Signing key for auth tokens | — | **yes — install as Secret** |
+| `LOCATION_CSC_PASSWORD_HASH` | CSC dashboard bcrypt password hash | — | **yes — install as Secret** |
+| `LOCATION_BOOKSTORE_PASSWORD_HASH` | Bookstore dashboard bcrypt password hash | — | **yes — install as Secret** |
+| `CORS_ALLOW_ORIGINS` | Optional comma-separated allowed browser origins | `https://passports.apps.ucsd.edu` | no |
 
-- **Secrets needed:** `passports-app-secrets` with key `JWT_SECRET` (a random 64-char hex string). Values delivered out-of-band.
+- **App Secret needed:** `passports-app-secrets` with keys `JWT_SECRET`, `LOCATION_CSC_PASSWORD_HASH`, and `LOCATION_BOOKSTORE_PASSWORD_HASH`. Values delivered out-of-band.
+- **TLS Secret needed:** `passports.apps.ucsd.edu` with `tls.crt` and `tls.key`, or provision that secret through the cluster TLS/cert-manager flow.
 - **Persistence:** SQLite database at `/data/passports.db`, expected size 1Gi. Litestream enabled — live DB on node-local `emptyDir`, PVC as replica target.
 
-## Default credentials (seeded on first run)
+## Dashboard credentials
 
-- CSC location password: `csc1960`
-- Bookstore location password: `book1960`
+No public default passwords are seeded. The app fails startup unless
+`JWT_SECRET`, `LOCATION_CSC_PASSWORD_HASH`, and
+`LOCATION_BOOKSTORE_PASSWORD_HASH` are supplied. The two location password
+hashes are the source of truth; on startup the app writes those hashes into
+the location rows. Generate bcrypt hashes with:
 
-These are seeded into the database on first startup and can be changed after login.
+```bash
+printf '%s\n' "$NEW_CSC_PASSWORD" | \
+  python -m backend.manage_passwords hash --password-stdin
+
+printf '%s\n' "$NEW_BOOKSTORE_PASSWORD" | \
+  python -m backend.manage_passwords hash --password-stdin
+```
+
+Then expose them to the pod with the required Secret object:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: passports-app-secrets
+type: Opaque
+stringData:
+  JWT_SECRET: "<random 32+ byte secret>"
+  LOCATION_CSC_PASSWORD_HASH: "<bcrypt hash>"
+  LOCATION_BOOKSTORE_PASSWORD_HASH: "<bcrypt hash>"
+```
+
+To rotate dashboard passwords, update the bcrypt hash values in
+`passports-app-secrets` and restart the deployment:
+
+```bash
+kubectl -n tai-passport apply -f passports-app-secrets.yaml
+kubectl -n tai-passport rollout restart deploy/passports-app
+```
+
+Do not store plaintext dashboard passwords in Helm values, ConfigMaps, or the
+repository.
 
 ## Ride-along services
 
@@ -54,7 +92,6 @@ None. Single-container app.
 | PUT | `/api/questions` | JWT |
 | GET | `/api/stats` | JWT |
 | GET | `/api/health` | Public |
-| GET | `/events` | JWT (SSE, query param `?token=...&location=...`) |
 
 ## Contact
 
