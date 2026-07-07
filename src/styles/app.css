@@ -1,5 +1,25 @@
 /* UC San Diego Passports — App-specific overrides for Decorator 5 */
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+.app-container {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+}
+
+.app-container > .layout-main {
+  flex: 1 0 auto;
+}
+
+.app-container > .footer {
+  flex-shrink: 0;
+}
+
 /* Toast slide-in animation */
 @keyframes slideIn {
   from { opacity: 0; transform: translateX(100%); }
