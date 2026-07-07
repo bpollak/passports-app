@@ -34,10 +34,11 @@ export default function SubscriberList() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  const csvCell = (value: string) => {
-    const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value
-    return `"${safe.replace(/"/g, '""')}"`
-  }
+  const escapeCsvFormulaCell = (value: string) =>
+    /^[=+\-@\t\r\n＝＋－＠]/.test(value) ? `'${value}` : value
+
+  const csvCell = (value: string) =>
+    `"${escapeCsvFormulaCell(value).replace(/"/g, '""')}"`
 
   const exportCSV = () => {
     const header = `${t('subscribers.colName', undefined, lang)},${t('subscribers.colEmail', undefined, lang)},${t('subscribers.colPhone', undefined, lang)},${t('subscribers.colOptIn', undefined, lang)}\n`

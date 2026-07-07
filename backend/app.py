@@ -3,14 +3,11 @@ import io
 import json
 import logging
 import os
-import time
-from collections import defaultdict, deque
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException, Query, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, func
@@ -30,40 +27,13 @@ from .seed import seed_database
 logger = logging.getLogger(__name__)
 
 _startup_error: str | None = None
-_rate_limits = defaultdict(deque)
+
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n", "＝", "＋", "－", "＠")
 
 
-def _cors_origins() -> list[str]:
-    value = os.environ.get("CORS_ALLOW_ORIGINS", "")
-    return [origin.strip() for origin in value.split(",") if origin.strip()]
-
-
-def _client_key(request: Request) -> str:
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        return forwarded_for.split(",", 1)[0].strip()
-    return request.client.host if request.client else "unknown"
-
-
-def _enforce_rate_limit(
-    request: Request,
-    bucket: str,
-    max_attempts: int,
-    window_seconds: int,
-) -> None:
-    now = time.monotonic()
-    key = f"{bucket}:{_client_key(request)}"
-    attempts = _rate_limits[key]
-    while attempts and now - attempts[0] > window_seconds:
-        attempts.popleft()
-    if len(attempts) >= max_attempts:
-        raise HTTPException(status_code=429, detail="Too many requests")
-    attempts.append(now)
-
-
-def _safe_csv(value) -> str:
+def escape_csv_formula_cell(value) -> str:
     text = "" if value is None else str(value)
-    if text.startswith(("=", "+", "-", "@", "\t", "\r")):
+    if text.startswith(CSV_FORMULA_PREFIXES):
         return f"'{text}"
     return text
 
@@ -86,14 +56,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="UC San Diego Passports API", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins(),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 @app.middleware("http")
@@ -135,11 +97,9 @@ async def get_current_location(request: Request) -> str:
 
 @app.post("/api/auth/login")
 async def login(
-    request: Request,
     body: LoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    _enforce_rate_limit(request, "login", max_attempts=10, window_seconds=300)
     result = await db.execute(select(Location))
     locations = result.scalars().all()
     for loc in locations:
@@ -151,11 +111,9 @@ async def login(
 
 @app.post("/api/checkin", response_model=CheckinResponse)
 async def checkin(
-    request: Request,
     body: CheckinRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    _enforce_rate_limit(request, "checkin", max_attempts=30, window_seconds=60)
     result = await db.execute(select(Location).where(Location.id == body.location_id))
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=400, detail="Invalid location")
@@ -301,11 +259,19 @@ async def export_visitors(
 
     for v in visitors:
         writer.writerow([
-            _safe_csv(v.id), _safe_csv(v.first_name), _safe_csv(v.last_name),
-            _safe_csv(v.email), _safe_csv(v.phone),
-            _safe_csv(v.visit_type), _safe_csv(v.service_type), _safe_csv(v.photo_format),
-            _safe_csv(yes_no(v.app_complete)), _safe_csv(v.checklist),
-            _safe_csv(yes_no(v.subscribe)), _safe_csv(v.notes), _safe_csv(v.status),
+            escape_csv_formula_cell(v.id),
+            escape_csv_formula_cell(v.first_name),
+            escape_csv_formula_cell(v.last_name),
+            escape_csv_formula_cell(v.email),
+            escape_csv_formula_cell(v.phone),
+            escape_csv_formula_cell(v.visit_type),
+            escape_csv_formula_cell(v.service_type),
+            escape_csv_formula_cell(v.photo_format),
+            escape_csv_formula_cell(yes_no(v.app_complete)),
+            escape_csv_formula_cell(v.checklist),
+            escape_csv_formula_cell(yes_no(v.subscribe)),
+            escape_csv_formula_cell(v.notes),
+            escape_csv_formula_cell(v.status),
             fmt_date(v.check_in_at), fmt_time(v.check_in_at), fmt_time(v.sign_out_at),
         ])
 

@@ -15,10 +15,10 @@
 | `JWT_SECRET` | Signing key for auth tokens | — | **yes — install as Secret** |
 | `LOCATION_CSC_PASSWORD_HASH` | CSC dashboard bcrypt password hash | — | **yes — install as Secret** |
 | `LOCATION_BOOKSTORE_PASSWORD_HASH` | Bookstore dashboard bcrypt password hash | — | **yes — install as Secret** |
-| `CORS_ALLOW_ORIGINS` | Optional comma-separated allowed browser origins | `https://passports.apps.ucsd.edu` | no |
 
 - **App Secret needed:** `passports-app-secrets` with keys `JWT_SECRET`, `LOCATION_CSC_PASSWORD_HASH`, and `LOCATION_BOOKSTORE_PASSWORD_HASH`. Values delivered out-of-band.
 - **TLS Secret needed:** `passports.apps.ucsd.edu` with `tls.crt` and `tls.key`, or provision that secret through the cluster TLS/cert-manager flow.
+- **Ingress responsibility:** CORS headers and rate limiting are owned by ingress/WAF policy, not by the app container.
 - **Persistence:** SQLite database at `/data/passports.db`, expected size 1Gi. Litestream enabled — live DB on node-local `emptyDir`, PVC as replica target.
 
 ## Dashboard credentials

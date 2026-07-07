@@ -21,6 +21,9 @@ npm run dev
 
 Open http://localhost:5173
 
+Local frontend development uses the Vite `/api` proxy to reach the backend.
+Production CORS headers and rate limiting are handled at ingress.
+
 ## Admin Passwords
 
 No default dashboard passwords are created. The app fails startup unless
