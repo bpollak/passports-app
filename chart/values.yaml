@@ -15,7 +15,6 @@ fullnameOverride: ""
 
 env:
   DATABASE_URL: "sqlite+aiosqlite:////data/passports.db"
-  CORS_ALLOW_ORIGINS: "https://passports.apps.ucsd.edu"
 
 envFrom: []
 
@@ -47,7 +46,8 @@ service:
 ingress:
   enabled: true
   className: ""
-  annotations: {}
+  annotations:
+    nginx.org/client-max-body-size: "5m"
   host: passports.apps.ucsd.edu
   path: /
   pathType: Prefix
