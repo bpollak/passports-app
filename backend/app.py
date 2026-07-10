@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
     try:
         await init_db()
         async for db in get_db():
-            await seed_database(db)
+            app.state.location_password_hashes = await seed_database(db)
             break
         logger.info("Database initialized successfully")
     except Exception as e:
@@ -98,14 +98,13 @@ async def get_current_location(request: Request) -> str:
 @app.post("/api/auth/login")
 async def login(
     body: LoginRequest,
-    db: AsyncSession = Depends(get_db),
+    request: Request,
 ):
-    result = await db.execute(select(Location))
-    locations = result.scalars().all()
-    for loc in locations:
-        if loc.password_hash and verify_password(body.password, loc.password_hash):
-            token = create_token(loc.id)
-            return LoginResponse(token=token, location_id=loc.id)
+    password_hashes: dict[str, str] = request.app.state.location_password_hashes
+    for location_id, password_hash in password_hashes.items():
+        if verify_password(body.password, password_hash):
+            token = create_token(location_id)
+            return LoginResponse(token=token, location_id=location_id)
     raise HTTPException(status_code=401, detail="Invalid password")
 
 

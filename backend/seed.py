@@ -32,8 +32,8 @@ def _validate_password_hash(loc_id: str, password_hash: str) -> None:
         raise RuntimeError(f"{_password_hash_env(loc_id)} is not a valid bcrypt hash") from exc
 
 
-async def seed_database(db: AsyncSession):
-    """Ensure locations and default form questions exist."""
+def get_configured_password_hashes() -> dict[str, str]:
+    """Load and validate the required location password hashes."""
     configured_password_hashes: dict[str, str] = {}
     missing_password_envs: list[str] = []
 
@@ -42,7 +42,6 @@ async def seed_database(db: AsyncSession):
         if not password_hash:
             missing_password_envs.append(_password_hash_env(loc_id))
             continue
-        _validate_password_hash(loc_id, password_hash)
         configured_password_hashes[loc_id] = password_hash
 
     if missing_password_envs:
@@ -51,6 +50,25 @@ async def seed_database(db: AsyncSession):
             "Location dashboard password hashes are required and no defaults are seeded. "
             f"Set bcrypt hashes via: {missing}"
         )
+
+    seen_hashes: dict[str, str] = {}
+    for loc_id, password_hash in configured_password_hashes.items():
+        _validate_password_hash(loc_id, password_hash)
+        duplicate_loc_id = seen_hashes.get(password_hash)
+        if duplicate_loc_id is not None:
+            raise RuntimeError(
+                "Location dashboard password hashes must be distinct: "
+                f"{_password_hash_env(duplicate_loc_id)} and "
+                f"{_password_hash_env(loc_id)} contain the same bcrypt hash"
+            )
+        seen_hashes[password_hash] = loc_id
+
+    return configured_password_hashes
+
+
+async def seed_database(db: AsyncSession) -> dict[str, str]:
+    """Ensure locations and default form questions exist."""
+    configured_password_hashes = get_configured_password_hashes()
 
     for loc_id, name in REQUIRED_LOCATIONS.items():
         result = await db.execute(select(Location).where(Location.id == loc_id))
@@ -94,3 +112,4 @@ async def seed_database(db: AsyncSession):
             db.add(FormQuestion(key=key, title=val["title"], description=val["description"]))
 
     await db.commit()
+    return configured_password_hashes

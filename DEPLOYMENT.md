@@ -25,9 +25,11 @@
 
 No public default passwords are seeded. The app fails startup unless
 `JWT_SECRET`, `LOCATION_CSC_PASSWORD_HASH`, and
-`LOCATION_BOOKSTORE_PASSWORD_HASH` are supplied. The two location password
-hashes are the source of truth; on startup the app writes those hashes into
-the location rows. Generate bcrypt hashes with:
+`LOCATION_BOOKSTORE_PASSWORD_HASH` are supplied. The configured hashes are the
+sole source of truth. On every start, the app validates and loads them for
+authentication, creates missing location rows, and refreshes database copies as
+derived state. A new or restored database therefore cannot override dashboard
+credentials. Generate initial bcrypt hashes with:
 
 ```bash
 printf '%s\n' "$NEW_CSC_PASSWORD" | \
@@ -37,7 +39,7 @@ printf '%s\n' "$NEW_BOOKSTORE_PASSWORD" | \
   python -m backend.manage_passwords hash --password-stdin
 ```
 
-Then expose them to the pod with the required Secret object:
+Expose the generated values to the pod with the required Secret object:
 
 ```yaml
 apiVersion: v1
@@ -51,12 +53,60 @@ stringData:
   LOCATION_BOOKSTORE_PASSWORD_HASH: "<bcrypt hash>"
 ```
 
-To rotate dashboard passwords, update the bcrypt hash values in
-`passports-app-secrets` and restart the deployment:
+### Production password rotation
+
+1. From a trusted terminal, run the rotation helper inside the live application
+   pod. It verifies the current password and checks the new password against the
+   other configured location, but does not mutate Kubernetes or the database:
+
+```bash
+kubectl -n tai-passport exec -it deploy/passports-app -- \
+  python -m backend.manage_passwords change --location csc
+```
+
+2. Copy the final bcrypt hash printed to stdout and replace only the matching
+   value in the admin-managed Secret; for this example:
+
+```yaml
+stringData:
+  LOCATION_CSC_PASSWORD_HASH: "<exact hash printed by the change command>"
+```
+
+3. Apply the updated Secret. A Secret update does not alter environment
+   variables in the existing pod, so the old password remains active until the
+   deployment is restarted:
 
 ```bash
 kubectl -n tai-passport apply -f passports-app-secrets.yaml
+```
+
+4. Restart and watch the rollout. The new pod loads the authoritative Secret
+   hash and refreshes the derived database copy during startup:
+
+```bash
 kubectl -n tai-passport rollout restart deploy/passports-app
+kubectl -n tai-passport rollout status deploy/passports-app
+```
+
+Repeat with `--location bookstore` and
+`LOCATION_BOOKSTORE_PASSWORD_HASH` for the Bookstore dashboard.
+
+### Rotation recovery
+
+If the helper's printed hash is lost before the Secret is updated, no state has
+changed. Rerun the helper with the same current password and choose a new value.
+Do not look for hashes in application logs.
+
+If the Secret was updated but the rollout has not happened, the old pod still
+uses its startup environment. Correct or roll back the Secret, then restart.
+Database and Litestream recovery are not part of credential recovery because
+their password-hash copies are derived from the Secret.
+
+To rerun the helper:
+
+```bash
+kubectl -n tai-passport exec -it deploy/passports-app -- \
+  python -m backend.manage_passwords change --location csc
 ```
 
 Do not store plaintext dashboard passwords in Helm values, ConfigMaps, or the

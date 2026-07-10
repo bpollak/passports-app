@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: .
 
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +47,10 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r backend/requirements.txt
 
       - name: Import check
         run: python -c "from backend.app import app; print('FastAPI app loaded OK')"
+
+      - name: Password management tests
+        run: python -m unittest discover -s backend/tests -v
