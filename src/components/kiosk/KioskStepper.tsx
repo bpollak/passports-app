@@ -193,39 +193,41 @@ export default function KioskStepper() {
     return (
       <div className="row" style={{ marginBottom: '2rem' }}>
         <div className="col-sm-12">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
             {steps.map((s, i) => (
-              <div key={s} style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: 32, height: 32, borderRadius: '50%',
-                  background: s < active ? '#00629B' : s === active ? '#182B49' : '#e0e0e0',
-                  color: s <= active ? '#fff' : '#999',
-                  fontWeight: 700, fontSize: '0.85rem', flexShrink: 0,
-                  transition: 'background 0.3s',
-                }}>
-                  {s < active
-                    ? <span className="glyphicon glyphicon-ok" style={{ fontSize: '0.75rem' }}></span>
-                    : s + 1}
-                </div>
-                {i < steps.length - 1 && (
+              <div key={s} style={{ display: 'flex', alignItems: 'center', flex: i === 0 ? '0 0 auto' : '1 1 0' }}>
+                {i > 0 && (
                   <div style={{
                     flex: 1, height: 3,
-                    background: s < active ? '#00629B' : '#e0e0e0',
-                    margin: '0 6px', borderRadius: 2,
+                    background: s - 1 < active ? '#00629B' : '#e0e0e0',
+                    borderRadius: 2,
                     transition: 'background 0.3s',
                   }} />
                 )}
-              </div>
-            ))}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, padding: '0 2px' }}>
-            {STEP_LABELS.slice(0, 4).map((label, i) => (
-              <div key={i} style={{
-                fontSize: '0.75rem', color: i === active ? '#182B49' : '#999',
-                fontWeight: i === active ? 700 : 400, textAlign: 'center', flex: 1,
-              }}>
-                {label}
+                <div style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  flexShrink: 0, width: 80,
+                }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 32, height: 32, borderRadius: '50%',
+                    background: s < active ? '#00629B' : s === active ? '#182B49' : '#e0e0e0',
+                    color: s <= active ? '#fff' : '#999',
+                    fontWeight: 700, fontSize: '0.85rem',
+                    transition: 'background 0.3s',
+                  }}>
+                    {s < active
+                      ? <span className="glyphicon glyphicon-ok" style={{ fontSize: '0.75rem' }}></span>
+                      : s + 1}
+                  </div>
+                  <div style={{
+                    fontSize: '0.75rem', color: s === active ? '#182B49' : '#999',
+                    fontWeight: s === active ? 700 : 400, textAlign: 'center',
+                    marginTop: 6, whiteSpace: 'nowrap',
+                  }}>
+                    {STEP_LABELS[s]}
+                  </div>
+                </div>
               </div>
             ))}
           </div>

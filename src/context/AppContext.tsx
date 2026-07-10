@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react'
 
 export type Language = 'en' | 'es' | 'zh' | 'vi'
 export type LocationId = 'csc' | 'bookstore'
@@ -30,13 +30,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     auth: null,
   })
 
-  const setLanguage = (lang: Language) => setState(s => ({ ...s, currentLanguage: lang }))
-  const setKioskLocation = (loc: LocationId | null) => setState(s => ({ ...s, kioskLocation: loc }))
-  const login = (token: string, locationId: LocationId) => setState(s => ({ ...s, auth: { token, locationId } }))
-  const logout = () => setState(s => ({ ...s, auth: null }))
+  const setLanguage = useCallback((lang: Language) => setState(s => ({ ...s, currentLanguage: lang })), [])
+  const setKioskLocation = useCallback((loc: LocationId | null) => setState(s => ({ ...s, kioskLocation: loc })), [])
+  const login = useCallback((token: string, locationId: LocationId) => setState(s => ({ ...s, auth: { token, locationId } })), [])
+  const logout = useCallback(() => setState(s => ({ ...s, auth: null })), [])
+
+  const value = useMemo<AppContextValue>(
+    () => ({ ...state, setLanguage, setKioskLocation, login, logout }),
+    [state, setLanguage, setKioskLocation, login, logout],
+  )
 
   return (
-    <AppContext.Provider value={{ ...state, setLanguage, setKioskLocation, login, logout }}>
+    <AppContext.Provider value={value}>
       {children}
     </AppContext.Provider>
   )
